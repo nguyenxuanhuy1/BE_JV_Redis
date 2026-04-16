@@ -14,6 +14,8 @@ public enum ErrorCode {
     UNAUTHORIZED(401, "Unauthorized"),
     FORBIDDEN(403, "Access denied"),
     REFRESH_TOKEN_EXPIRED(401, "Refresh token đã hết hạn, vui lòng đăng nhập lại"),
+    TOKEN_BLACKLISTED(401, "Token đã bị thu hồi, vui lòng đăng nhập lại"),
+    TOKEN_VERSION_INVALID(401, "Phiên đăng nhập đã hết hạn trên thiết bị này, vui lòng đăng nhập lại"),
 
     // Wheel
     WHEEL_NOT_FOUND(404, "Wheel not found"),

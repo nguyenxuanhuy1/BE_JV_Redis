@@ -32,6 +32,9 @@ public class User extends BaseEntity implements UserDetails {
     @Builder.Default
     private boolean enabled = true;
 
+    @Builder.Default
+    private Integer tokenVersion = 1;
+
     // ---- UserDetails ----
 
     @Override

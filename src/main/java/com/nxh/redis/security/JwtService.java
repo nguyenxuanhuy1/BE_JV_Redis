@@ -1,5 +1,6 @@
 package com.nxh.redis.security;
 
+import com.nxh.redis.entity.User;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
@@ -10,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
 import java.util.Date;
+import java.util.UUID;
 import java.util.function.Function;
 
 @Service
@@ -27,7 +29,8 @@ public class JwtService {
     // ---- Generate ----
 
     /**
-     * Access token: chứa role, hết hạn ngắn (mặc định 24h).
+     * Access token: chứa role, jti (UUID), version, hết hạn ngắn (mặc định 24h).
+     * Cast UserDetails → User để lấy tokenVersion phục vụ per-device logout.
      */
     public String generateToken(UserDetails userDetails) {
         String role = userDetails.getAuthorities().stream()
@@ -35,10 +38,14 @@ public class JwtService {
                 .map(a -> a.getAuthority().replace("ROLE_", ""))
                 .orElse("USER");
 
+        int version = (userDetails instanceof User u) ? u.getTokenVersion() : 1;
+
         return Jwts.builder()
                 .subject(userDetails.getUsername())
                 .claim("role", role)
                 .claim("type", "access")
+                .claim("version", version)
+                .id(UUID.randomUUID().toString())   // jti claim
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + expiration))
                 .signWith(getSigningKey())
@@ -46,12 +53,16 @@ public class JwtService {
     }
 
     /**
-     * Refresh token: không chứa role, hết hạn dài (mặc định 7 ngày).
+     * Refresh token: không chứa role, có jti + version, hết hạn dài (mặc định 7 ngày).
      */
     public String generateRefreshToken(UserDetails userDetails) {
+        int version = (userDetails instanceof User u) ? u.getTokenVersion() : 1;
+
         return Jwts.builder()
                 .subject(userDetails.getUsername())
                 .claim("type", "refresh")
+                .claim("version", version)
+                .id(UUID.randomUUID().toString())   // jti claim
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + refreshExpiration))
                 .signWith(getSigningKey())
@@ -66,6 +77,21 @@ public class JwtService {
 
     public String extractRole(String token) {
         return extractClaim(token, claims -> claims.get("role", String.class));
+    }
+
+    /** Trả về jti (JWT ID) — dùng cho blacklist. */
+    public String extractJti(String token) {
+        return extractClaim(token, Claims::getId);
+    }
+
+    /** Trả về tokenVersion nhúng trong JWT — dùng để so sánh với giá trị Redis/DB. */
+    public Integer extractVersion(String token) {
+        return extractClaim(token, claims -> claims.get("version", Integer.class));
+    }
+
+    /** Trả về thời điểm hết hạn — dùng để tính TTL khi lưu vào blacklist. */
+    public Date extractExpiration(String token) {
+        return extractClaim(token, Claims::getExpiration);
     }
 
     // ---- Validate ----
