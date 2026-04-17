@@ -75,31 +75,14 @@ public class AuthServiceImpl implements AuthService {
         String refreshToken = jwtService.generateRefreshToken(user);
 
         // 4. Đồng bộ tokenVersion vào Redis (ghi đè nếu đã tồn tại)
-//        if (redisTemplate != null) {
-//            redisTemplate.opsForValue().set(
-//                    VERSION_PREFIX + user.getId(),
-//                    user.getTokenVersion(),
-//                    Duration.ofDays(8)   // TTL > refresh token (7 ngày) để tránh miss
-//            );
-//        }
-        if (redisTemplate == null) {
-            System.out.println("❌ RedisTemplate NULL → KHÔNG lưu Redis");
-        } else {
-            String key = VERSION_PREFIX + user.getId();
-            Object value = user.getTokenVersion();
-
-            System.out.println("✅ ĐANG LƯU REDIS:");
-            System.out.println("KEY = " + key);
-            System.out.println("VALUE = " + value);
-
+        if (redisTemplate != null) {
             redisTemplate.opsForValue().set(
-                    key,
-                    value,
-                    Duration.ofDays(8)
+                    VERSION_PREFIX + user.getId(),
+                    user.getTokenVersion(),
+                    Duration.ofDays(8)   // TTL > refresh token (7 ngày) để tránh miss
             );
-
-            System.out.println("✅ ĐÃ GỌI set() Redis");
         }
+
         return AuthResponse.builder()
                 .token(token)
                 .refreshToken(refreshToken)

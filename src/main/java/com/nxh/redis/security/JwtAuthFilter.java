@@ -6,6 +6,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.lang.NonNull;
@@ -22,6 +23,7 @@ import java.time.Duration;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class JwtAuthFilter extends OncePerRequestFilter {
 
     private static final String BLACKLIST_PREFIX = "auth:blacklist:";
@@ -30,10 +32,6 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private final JwtService jwtService;
     private final UserDetailsService userDetailsService;
 
-    /**
-     * Inject optional — chỉ có khi chạy với profile "redis".
-     * Khi null, bỏ qua kiểm tra blacklist/version (app vẫn khởi động bình thường).
-     */
     @Autowired(required = false)
     private RedisTemplate<String, Object> redisTemplate;
 
@@ -53,50 +51,49 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
         final String jwt = authHeader.substring(7);
 
-        // ── Bước 1: Extract username (token không hợp lệ → pass, Spring Security tự chặn) ──
+        // 1. Extract username
         final String username;
         try {
             username = jwtService.extractUsername(jwt);
         } catch (Exception e) {
+            log.error("Không thể giải mã Token: {}", e.getMessage());
             filterChain.doFilter(request, response);
             return;
         }
 
-        // ── Bước 2: Kiểm tra Blacklist ──
+        // 2. Kiểm tra Blacklist (Chốt chặn logout cho token cụ thể)
         if (redisTemplate != null) {
             try {
                 String jti = jwtService.extractJti(jwt);
-                Boolean blacklisted = redisTemplate.hasKey(BLACKLIST_PREFIX + jti);
-                if (Boolean.TRUE.equals(blacklisted)) {
-                    sendUnauthorized(response, "TOKEN_BLACKLISTED",
-                            "Token đã bị thu hồi, vui lòng đăng nhập lại");
+                if (jti != null && Boolean.TRUE.equals(redisTemplate.hasKey(BLACKLIST_PREFIX + jti))) {
+                    sendUnauthorized(response, "TOKEN_BLACKLISTED", "Token đã bị thu hồi, vui lòng đăng nhập lại");
                     return;
                 }
-            } catch (Exception ignored) {
-                // Lỗi Redis không chặn request — fail open để tránh Redis outage gây service down
+            } catch (Exception e) {
+                log.warn("Redis lỗi khi check blacklist (Fail-Open): {}", e.getMessage());
             }
         }
 
-        // ── Bước 3: Load user + validate token ──
+        // 3. Load user + validate token
         if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
             UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 
             if (jwtService.isTokenValid(jwt, userDetails)) {
 
-                // ── Bước 4: Kiểm tra Token Version (Cache Aside) ──
+                // 4. Kiểm tra Token Version (Đăng xuất từ xa / Đổi mật khẩu)
                 if (redisTemplate != null && userDetails instanceof User user) {
                     try {
                         if (!isVersionValid(jwt, user)) {
                             sendUnauthorized(response, "TOKEN_VERSION_INVALID",
-                                    "Phiên đăng nhập đã hết hạn trên thiết bị này, vui lòng đăng nhập lại");
+                                    "Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại");
                             return;
                         }
-                    } catch (Exception ignored) {
-                        // Lỗi Redis → bỏ qua kiểm tra version, fail open
+                    } catch (Exception e) {
+                        log.warn("Redis lỗi khi check version (Fail-Open): {}", e.getMessage());
                     }
                 }
 
-                // ── Bước 5: Set Authentication ──
+                // 5. Set Authentication
                 var authToken = new UsernamePasswordAuthenticationToken(
                         userDetails, null, userDetails.getAuthorities());
                 authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
@@ -108,8 +105,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     }
 
     /**
-     * So sánh version trong token với currentVersion trong Redis.
-     * Cache Aside: nếu Redis miss → lấy từ DB (User entity đã load) rồi set lại Redis.
+     * Kiểm tra version trong Token có khớp với version hiện tại không.
      */
     private boolean isVersionValid(String jwt, User user) {
         Integer tokenVersion = jwtService.extractVersion(jwt);
@@ -120,24 +116,30 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
         int currentVersion;
         if (cached != null) {
-            currentVersion = ((Number) cached).intValue();
+            // Xử lý an toàn khi lấy dữ liệu từ Redis (có thể là String hoặc Integer)
+            if (cached instanceof Number number) {
+                currentVersion = number.intValue();
+            } else {
+                currentVersion = Integer.parseInt(cached.toString());
+            }
         } else {
-            // Cache miss → lấy từ User entity (đã load từ DB) rồi warm up cache
+            // Cache miss -> Warm up từ DB (User entity đã được load bởi userDetailsService)
             currentVersion = user.getTokenVersion();
             redisTemplate.opsForValue().set(redisKey, currentVersion, Duration.ofDays(8));
         }
 
-        return tokenVersion >= currentVersion;
+        // Nếu version trong Token KHÁC version mới nhất -> Token không còn hiệu lực
+        return tokenVersion == currentVersion;
     }
 
-    /**
-     * Gửi response 401 JSON trực tiếp và kết thúc filter chain.
-     */
     private void sendUnauthorized(HttpServletResponse response, String code, String message)
             throws IOException {
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setContentType("application/json;charset=UTF-8");
-        response.getWriter().write(String.format(
-                "{\"success\":false,\"message\":\"%s\",\"data\":null}", message));
+        // Format đúng chuẩn ApiResponse của bạn
+        String jsonResponse = String.format(
+                "{\"success\":false,\"code\":\"%s\",\"message\":\"%s\",\"data\":null}",
+                code, message);
+        response.getWriter().write(jsonResponse);
     }
 }
