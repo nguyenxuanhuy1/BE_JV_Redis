@@ -28,6 +28,14 @@ public class JwtService {
 
     // ---- Generate ----
 
+    public String generateAccessToken(UserDetails userDetails) {
+        return generateToken(userDetails);
+    }
+
+    public boolean validateToken(String token, UserDetails userDetails) {
+        return isTokenValid(token, userDetails);
+    }
+
     /**
      * Access token: chứa role, jti (UUID), version, hết hạn ngắn (mặc định 24h).
      * Cast UserDetails → User để lấy tokenVersion phục vụ per-device logout.

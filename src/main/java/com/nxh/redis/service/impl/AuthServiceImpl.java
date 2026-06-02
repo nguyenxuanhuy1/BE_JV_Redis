@@ -1,7 +1,6 @@
 package com.nxh.redis.service.impl;
 
 import com.nxh.redis.dto.auth.AuthRequest;
-import com.nxh.redis.dto.auth.AuthResponse;
 import com.nxh.redis.dto.auth.RefreshRequest;
 import com.nxh.redis.entity.User;
 import com.nxh.redis.enums.Role;
@@ -11,6 +10,7 @@ import com.nxh.redis.repository.UserRepository;
 import com.nxh.redis.security.JwtService;
 import com.nxh.redis.service.AuthService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -24,6 +24,7 @@ import java.util.Date;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class AuthServiceImpl implements AuthService {
 
     // ── Key prefix constants ──
@@ -60,7 +61,7 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public AuthResponse login(AuthRequest request) {
+    public User authenticate(AuthRequest request) {
         // 1. Xác thực username/password
         authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword())
@@ -70,49 +71,20 @@ public class AuthServiceImpl implements AuthService {
         User user = userRepository.findByUsername(request.getUsername())
                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
 
-        // 3. Sinh token
-        String token        = jwtService.generateToken(user);
-        String refreshToken = jwtService.generateRefreshToken(user);
-
-        // 4. Đồng bộ tokenVersion vào Redis (ghi đè nếu đã tồn tại)
-        if (redisTemplate != null) {
-            redisTemplate.opsForValue().set(
-                    VERSION_PREFIX + user.getId(),
-                    user.getTokenVersion(),
-                    Duration.ofDays(8)   // TTL > refresh token (7 ngày) để tránh miss
-            );
+        // 3. Đồng bộ tokenVersion vào Redis (ghi đè nếu đã tồn tại)
+        try {
+            if (redisTemplate != null) {
+                redisTemplate.opsForValue().set(
+                        VERSION_PREFIX + user.getId(),
+                        user.getTokenVersion(),
+                        Duration.ofDays(8)   // TTL > refresh token (7 ngày) để tránh miss
+                );
+            }
+        } catch (Exception e) {
+            log.error("Lỗi đồng bộ tokenVersion lên Redis khi đăng nhập: {}", e.getMessage());
         }
 
-        return AuthResponse.builder()
-                .token(token)
-                .refreshToken(refreshToken)
-                .build();
-    }
-
-    @Override
-    public AuthResponse refresh(RefreshRequest request) {
-        String refreshToken = request.getRefreshToken();
-
-        // 1. Kiểm tra token có hợp lệ không (chữ ký + hạn dùng)
-        if (!jwtService.isTokenNotExpired(refreshToken)) {
-            throw new AppException(ErrorCode.REFRESH_TOKEN_EXPIRED);
-        }
-
-        // 2. Lấy username từ refresh token
-        String username = jwtService.extractUsername(refreshToken);
-
-        // 3. Load user từ DB
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_FOUND));
-
-        // 4. Sinh access token mới + rotate refresh token
-        String newToken        = jwtService.generateToken(user);
-        String newRefreshToken = jwtService.generateRefreshToken(user);
-
-        return AuthResponse.builder()
-                .token(newToken)
-                .refreshToken(newRefreshToken)
-                .build();
+        return user;
     }
 
     /**
@@ -126,21 +98,28 @@ public class AuthServiceImpl implements AuthService {
         // Token đã hết hạn → không cần blacklist
         if (!jwtService.isTokenNotExpired(accessToken)) return;
 
+        String jti;
+        Date expiration;
         try {
-            String jti        = jwtService.extractJti(accessToken);
-            Date expiration   = jwtService.extractExpiration(accessToken);
-            long ttlSeconds   = (expiration.getTime() - System.currentTimeMillis()) / 1000;
+            jti        = jwtService.extractJti(accessToken);
+            expiration   = jwtService.extractExpiration(accessToken);
+        } catch (Exception e) {
+            // Lỗi khi parse token → coi như đã logout thành công (token không hợp lệ)
+            throw new AppException(ErrorCode.UNAUTHORIZED);
+        }
 
-            if (ttlSeconds > 0) {
+        long ttlSeconds   = (expiration.getTime() - System.currentTimeMillis()) / 1000;
+
+        if (ttlSeconds > 0) {
+            try {
                 redisTemplate.opsForValue().set(
                         BLACKLIST_PREFIX + jti,
                         "1",
                         Duration.ofSeconds(ttlSeconds)
                 );
+            } catch (Exception e) {
+                log.error("Lỗi khi thêm token vào blacklist trên Redis: {}", e.getMessage());
             }
-        } catch (Exception e) {
-            // Lỗi khi parse token → coi như đã logout thành công (token không hợp lệ)
-            throw new AppException(ErrorCode.UNAUTHORIZED);
         }
     }
 
@@ -159,12 +138,16 @@ public class AuthServiceImpl implements AuthService {
         userRepository.save(user);
 
         // Cập nhật version mới vào Redis
-        if (redisTemplate != null) {
-            redisTemplate.opsForValue().set(
-                    VERSION_PREFIX + userId,
-                    user.getTokenVersion(),
-                    Duration.ofDays(8)
-            );
+        try {
+            if (redisTemplate != null) {
+                redisTemplate.opsForValue().set(
+                        VERSION_PREFIX + userId,
+                        user.getTokenVersion(),
+                        Duration.ofDays(8)
+                );
+            }
+        } catch (Exception e) {
+            log.error("Lỗi cập nhật token version lên Redis khi logout-all: {}", e.getMessage());
         }
     }
 }
