@@ -31,7 +31,9 @@ public class SecurityConfig {
     private static final String[] PUBLIC_URLS = {
             "/api/auth/register",
             "/api/auth/login",
-            "/api/auth/refresh"
+            "/api/auth/refresh",
+            "/api/battles/**",
+            "/ws-battle/**"
     };
 
     @Bean
