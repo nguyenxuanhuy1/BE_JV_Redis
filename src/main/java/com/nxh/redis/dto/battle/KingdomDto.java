@@ -32,5 +32,6 @@ public class KingdomDto {
     private int score;
     private List<Integer> scoreHistory;
     private boolean alive;
+    private boolean ready;
     private String color;
 }

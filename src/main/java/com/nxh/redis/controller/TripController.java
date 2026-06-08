@@ -1,13 +1,13 @@
 package com.nxh.redis.controller;
+
+import com.nxh.redis.dto.ApiResponse;
 import com.nxh.redis.dto.page.PageResponseDto;
 import com.nxh.redis.dto.trip.TripRequest;
 import com.nxh.redis.dto.trip.TripResponse;
 import com.nxh.redis.service.TripService;
-
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import reactor.core.publisher.Flux;
 
 import java.util.List;
 
@@ -16,24 +16,21 @@ import java.util.List;
 @RequiredArgsConstructor
 public class TripController {
     private final TripService tripService;
-//    private final TripStreamService tripStreamService;
 
     @GetMapping
-    public PageResponseDto<TripResponse> getTrips(
+    public ResponseEntity<ApiResponse<PageResponseDto<TripResponse>>> getTrips(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(defaultValue = "createdAt:desc") List<String> sorts) {
 
-        return tripService.getTrips(page, size, sorts);
+        PageResponseDto<TripResponse> data = tripService.getTrips(page, size, sorts);
+        return ResponseEntity.ok(ApiResponse.success(data));
     }
 
     @PostMapping
-    public TripResponse createTrip(@RequestBody TripRequest request) {
-        return tripService.createTrip(request);
+    public ResponseEntity<ApiResponse<TripResponse>> createTrip(@RequestBody TripRequest request) {
+        TripResponse data = tripService.createTrip(request);
+        return ResponseEntity.ok(ApiResponse.success("Tạo chuyến đi thành công", data));
     }
-
-//    @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-//    public Flux<TripResponse> stream() {
-//        return tripStreamService.getStream();
-//    }
 }
+

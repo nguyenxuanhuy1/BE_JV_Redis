@@ -20,7 +20,13 @@ public enum ErrorCode {
     // Wheel
     WHEEL_NOT_FOUND(404, "Wheel not found"),
     WHEEL_NO_ITEMS(422, "Wheel has no items"),
-    WHEEL_PRESET_INVALID(400, "Preset result is not in wheel items");
+    WHEEL_PRESET_INVALID(400, "Preset result is not in wheel items"),
+
+    // Battle
+    BATTLE_NOT_FOUND(404, "Phòng đấu không tồn tại"),
+    BATTLE_ROOM_FULL(400, "Phòng đấu đã đầy (tối đa 4 người)"),
+    BATTLE_ALREADY_STARTED(400, "Trận đấu đã bắt đầu hoặc đã kết thúc"),
+    PLAYERS_NOT_READY(400, "Tất cả người chơi khác phải sẵn sàng mới có thể bắt đầu trận đấu");
 
     private final int status;
     private final String message;

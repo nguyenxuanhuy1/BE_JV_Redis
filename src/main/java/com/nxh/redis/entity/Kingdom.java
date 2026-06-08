@@ -49,6 +49,8 @@ public class Kingdom {
     private String scoreHistory; // comma-separated scores, e.g. "100,105"
 
     private boolean alive;
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean ready;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "battle_id")
